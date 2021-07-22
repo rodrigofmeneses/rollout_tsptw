@@ -152,21 +152,19 @@ def backtraking_greed_policy(solution, current_time, distance_matrix, intervals)
     i = 0
     num_nodes = distance_matrix.shape[0]
     level = []
-    # level = np.zeros(1, dtype=np.int32)[:-1]
     time_control = np.zeros(num_nodes, dtype=np.int32)
     time_control[i] = current_time
-    # time_control = [current_time]
     
     while solution.size != num_nodes:
+
+        if i == -1:
+                # Infeasible
+                # print('Infeasible')
+                return solution
         # Existem ações pra seguir?
         if i >= len(level):
             actions = one_step_viability(solution, current_time, distance_matrix, intervals)
-            # level.append(actions.copy())
             level.append(actions)
-            if i == 0 and actions.size == 0:
-                # Infeasible
-                print('Infeasible')
-                return solution
             continue
 
         if len(level[i]) != 0:
@@ -196,31 +194,38 @@ def backtraking_greed_policy(solution, current_time, distance_matrix, intervals)
 
 def rollout_algorithm(problem, starting_node=0):
     # Distance Matrix
-    distance_matrix = problem['distance_matrix']
+    distance_matrix = np.array(problem['distance_matrix'], dtype=np.int32)
+    intervals = np.array(problem['intervals'], dtype=np.int32)
+    current_time = np.int32(0)
     # Number of cities
-    num_cities = problem['dimension']
+    num_cities = np.array(problem['dimension'], dtype=np.int32) 
+    
     # Initial solution
-    # solution = List([starting_node])
     solution = [starting_node]
+    # solution = np.array([starting_node], dtype=np.int32)
 
     # Rollout Algorithm run for num_cities - 1 steps
     for _ in range(num_cities - 1):
         # Initialize a copy to current solution
         current_solution = solution.copy()
         # What we want optimize, rollout cost
-        best_rollout_cost = np.inf
+        best_rollout_cost = np.int32(999999)
         # Best next city!
         best_next_city = None
         
-        # Run over cities not visiteds
-        for j in set(range(num_cities)) - set(solution):
+        # Run over viable cities not visiteds
+        for j in one_step_viability(np.array(current_solution, dtype=np.int32), current_time, distance_matrix, intervals):
             # Adding candidate next city
             current_solution.append(j)
+            auxiliar_time = current_time + distance_matrix[current_solution[-2], current_solution[-1]]
 
             # Run Base Policy
-            nn_solution = backtraking_greed_policy(problem, current_solution.copy(), distance_matrix.copy())
+            backtracking_solution = backtraking_greed_policy(np.array(current_solution, dtype=np.int32), auxiliar_time, distance_matrix, intervals)
             # rollout_cost = calculate_solution_cost(nn_solution, List(distance_matrix))
-            rollout_cost = calculate_solution_cost(nn_solution, distance_matrix)
+            if len(backtracking_solution) != num_cities:
+                rollout_cost = np.int32(999999)
+            else:
+                rollout_cost = calculate_solution_cost(backtracking_solution, distance_matrix)
             # Tests to optimize costs.
             if rollout_cost < best_rollout_cost:
                 best_rollout_cost = rollout_cost
@@ -235,17 +240,45 @@ def rollout_algorithm(problem, starting_node=0):
 
     return solution
 
-np.random.seed(13123123)
-# path = '/home/rodrigomeneses/Documents/repositorios/rollout_tsptw/instances/tsptw_data/DumasEtAl/n20w20.002.txt'
-path = 'instances/tsptw_data/DumasEtAl/n20w20.002.txt'
-problem = read_data(path)
-pre_process(problem['distance_matrix'], problem['intervals'])
+def experiments_with(problem):
+    start = time.time()
+    rollout_solution = rollout_algorithm(problem)
+    rollout_time = time.time() - start
+    rollout_cost = calculate_solution_cost(rollout_solution, problem['distance_matrix'])
+    
+    # execute nearest neighbor algorithm and calculate time
+    start = time.time()
+    backtracking_solution = backtraking_greed_policy(np.array([0], dtype=np.int32), 0, \
+        np.array(problem['distance_matrix'], dtype=np.int32), \
+        np.array(problem['intervals'], dtype=np.int32))
+    backtracking_time = time.time() - start
+    backtracking_cost = calculate_solution_cost(backtracking_solution, problem['distance_matrix'])
 
-# solution = np.array([1, 17, 10, 20, 18, 19, 11, 6, 16, 2, 12, 13, 7, 14, 8, 3, 5, 9, 21, 4, 15, 1]) - 1
-solution = np.array([1, 2, 15, 19, 5, 9, 8, 6, 16, 12, 17, 20, 18, 11, 13, 4, 7, 3, 21, 10, 14, 1]) - 1
-# solution = np.array([1, 6, 20, 14, 2, 9, 17, 5, 10, 4, 8, 16, 15, 18, 12, 3, 11, 19, 21, 7, 13, 1]) - 1
-# solution = np.array([1, 12, 4, 3, 20, 8, 16, 10, 9, 6, 7, 11, 15, 5, 13, 17, 19, 14, 21, 18, 2, 1]) - 1
-# solution = np.array([1, 20, 12, 8, 19, 17, 14, 9, 4, 18, 3, 6, 11, 5, 16, 10, 15, 7, 21, 2, 13, 1]) - 1
-print(calculate_solution_cost(solution, problem['distance_matrix']))
-print(is_feasible(solution, problem['distance_matrix'], problem['intervals']))
-print(backtraking_greed_policy(np.array([0], dtype=np.int32), 0, np.array(problem['distance_matrix'], dtype=np.int32), np.array(problem['intervals'], dtype=np.int32)))
+    return rollout_solution, rollout_cost, rollout_time, backtracking_solution, backtracking_cost, backtracking_time
+
+np.random.seed(13123123)
+
+# for i in [20, 40, 60]:
+for i in [20]:
+    # for j in [20, 40, 60, 80]:
+    for j in [20]:
+        # Create Results file
+        results = open(f'experiments/results_{time.strftime("%d%b%Y_%H_%M_%S", time.gmtime())}.txt', 'w')
+        # Write header
+        results.write('instance_name,rol_cost,rol_time,nn_cost,nn_time\n')
+        for k in [1, 2, 3, 4, 5]:
+            # Instance Name 
+            instance = f'n{i}w{j}.00{k}'
+
+            # Start tests
+            path = f'instances/tsptw_data/DumasEtAl/{instance}.txt'
+            problem = read_data(path)
+            pre_process(problem['distance_matrix'], problem['intervals'])
+            rollout_solution, rollout_cost, rollout_time, backtracking_solution, backtracking_cost, backtracking_time = experiments_with(problem)
+            results.write(f'{instance},{rollout_cost},{rollout_time},{backtracking_cost},{backtracking_time}\n')
+            results.write(str(np.array(rollout_solution)) +'\n')
+            results.write(str(np.array(backtracking_solution)) +'\n')
+    
+    results.close()
+
+    
