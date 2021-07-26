@@ -251,21 +251,20 @@ def experiments_with(problem):
     backtracking_solution = backtraking_greed_policy(np.array([0], dtype=np.int32), 0, \
         np.array(problem['distance_matrix'], dtype=np.int32), \
         np.array(problem['intervals'], dtype=np.int32))
+    backtracking_solution = np.append(backtracking_solution, 0)
     backtracking_time = time.time() - start
     backtracking_cost = calculate_solution_cost(backtracking_solution, problem['distance_matrix'])
 
     return rollout_solution, rollout_cost, rollout_time, backtracking_solution, backtracking_cost, backtracking_time
 
-np.random.seed(13123123)
-
 # for i in [20, 40, 60]:
-for i in [20]:
+for i in [40]:
     # for j in [20, 40, 60, 80]:
     for j in [20]:
         # Create Results file
         results = open(f'experiments/results_{time.strftime("%d%b%Y_%H_%M_%S", time.gmtime())}.txt', 'w')
         # Write header
-        results.write('instance_name,rol_cost,rol_time,nn_cost,nn_time\n')
+        results.write('instance_name,rol_cost,rol_time,backtracking_cost,backtracking_time\n')
         for k in [1, 2, 3, 4, 5]:
             # Instance Name 
             instance = f'n{i}w{j}.00{k}'
@@ -276,8 +275,8 @@ for i in [20]:
             pre_process(problem['distance_matrix'], problem['intervals'])
             rollout_solution, rollout_cost, rollout_time, backtracking_solution, backtracking_cost, backtracking_time = experiments_with(problem)
             results.write(f'{instance},{rollout_cost},{rollout_time},{backtracking_cost},{backtracking_time}\n')
-            results.write(str(np.array(rollout_solution)) +'\n')
-            results.write(str(np.array(backtracking_solution)) +'\n')
+            results.write('rollout:      ' + str(np.array(rollout_solution)) +'\n')
+            results.write('backtracking: ' + str(np.array(backtracking_solution)) +'\n')
     
     results.close()
 
