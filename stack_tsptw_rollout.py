@@ -1,7 +1,8 @@
+#%%
 import numpy as np
-import time
 from numba import njit
-
+import time
+#%%
 def read_data(path):
     instance_author = path.split('/')[-2]
     coordinates = []
@@ -53,9 +54,8 @@ def read_data(path):
             intervals.pop()
 
     dimension = len(coordinates)
-
     distance_matrix = np.zeros((dimension, dimension))
-
+    
     for i in range(dimension):
         for j in range(i + 1, dimension):
             px = np.power(coordinates[i][0] - coordinates[j][0], 2)
@@ -79,6 +79,7 @@ def pre_process(distance_matrix, intervals):
             if intervals[i][0] + distance_matrix[i, j] > intervals[j][1]:
                 distance_matrix[i, j] = np.int32(999999)
 
+@njit
 def calculate_solution_cost(solution, distance_matrix):
     '''
         Calc cost of solution.
@@ -91,47 +92,75 @@ def calculate_solution_cost(solution, distance_matrix):
     for i in range(len(solution) - 1):
         cost += distance_matrix[solution[i]][solution[i+1]]
     return cost
+#%%
 
+@njit
 def is_feasible(solution, distance_matrix, intervals):
-    if len(solution) != distance_matrix.shape[0] + 1:
-        return False
-        
-    sum = 0
+
+    num_nodes = distance_matrix.shape[0]
+    cost = 0
     current_node = solution[0]
-    node_flags = [True] * len(solution)
+    node_flags = np.ones(num_nodes)
 
-    for i in solution[1:]:
-
+    for i in range(1, num_nodes + 1):
         # TSP constraint
-        if node_flags[i] == True:
-            node_flags[i] = False
+        if node_flags[solution[i]] == True:
+            node_flags[solution[i]] = False
         else:
             return False
         
         # Windows Constraint
-        if intervals[current_node][0] > sum:
-            sum = intervals[current_node][0]
-        elif sum > intervals[current_node][1]:
+        if cost < intervals[current_node][0]:
+            cost = intervals[current_node][0]
+        elif cost > intervals[current_node][1]:
             return False
-        sum += distance_matrix[current_node, i]
-        current_node = i
+        cost += distance_matrix[current_node, solution[i]]
+        current_node = solution[i]
     
     return True
 
+#%%
 @njit
-def best_step(current_state, current_time, actions, distance_matrix, intervals):
-    best_step = 0
-    best_distance = np.int32(999999)
-    for step in actions:
-        if current_time < intervals[step][0]:
-            current_distance = intervals[step][0] + distance_matrix[current_state, step]
-        else:
-            current_distance = current_time + distance_matrix[current_state, step]
-        if current_distance < best_distance:
-            best_distance = current_distance
-            best_step = step
-    return np.int32(best_step)
+def backtracking(solution, distance_matrix, intervals):
+    
+    num_nodes = distance_matrix.shape[0]
+    all_states = np.arange(num_nodes)
+    solutions_stack = []
+    
+    solutions_stack.append(solution)
 
+    while len(solutions_stack) != 0:
+
+        current_solution = solutions_stack.pop()
+        c_step = num_nodes - 2
+        for i in range(2, num_nodes + 2):
+            if current_solution[i] == 0:
+                c_step = i
+                break
+        
+        if is_feasible(current_solution[1:], distance_matrix, intervals):
+            return current_solution
+        
+        action_list = np.zeros((num_nodes, num_nodes + 2), dtype=np.int32)
+        for i in range(num_nodes):
+            step = all_states[i]
+            if step in current_solution[1:]:
+                continue
+            one_step_time = current_solution[0] + distance_matrix[current_solution[c_step - 1], step]
+            if one_step_time <= intervals[step][1]:
+                action_list[i] = current_solution[:]
+                action_list[i][0] = max(one_step_time, intervals[step][0])
+                action_list[i][c_step] = step
+                
+        action_list = action_list[np.argsort(action_list[:, 0])][::-1]
+
+        for i in range(num_nodes):
+            if action_list[i][0] != 0:
+                solutions_stack.append(action_list[i])
+        
+    return current_solution
+
+#%%
 @njit
 def one_step_viability(solution, current_time, distance_matrix, intervals):
     all_states = np.arange(distance_matrix.shape[0], dtype=np.int32)
@@ -143,70 +172,22 @@ def one_step_viability(solution, current_time, distance_matrix, intervals):
         elif distance_matrix[solution[-1], step] == np.int32(999999):
             continue
         one_step_time = current_time + distance_matrix[solution[-1], step]
-        if one_step_time < intervals[step][1]:
+        if one_step_time <= intervals[step][1]:
             actions = np.append(actions, step)
     
     return actions
 
-
-
-@njit
-def backtraking_greed_policy(solution, current_time, distance_matrix, intervals):
-    i = 0
-    num_nodes = distance_matrix.shape[0]
-    level = []
-    time_control = np.zeros(num_nodes, dtype=np.int32)
-    time_control[i] = current_time
-    
-    while solution.size != num_nodes:
-
-        if i == -1:
-                # Infeasible
-                # print('Infeasible')
-                return solution
-        # Existem ações pra seguir?
-        if i >= len(level):
-            actions = one_step_viability(solution, current_time, distance_matrix, intervals)
-            level.append(actions)
-            continue
-
-        if len(level[i]) != 0:
-            # step = np.random.choice((level[i]))
-            step = best_step(solution[-1], current_time, (level[i]), distance_matrix, intervals)
-            rm = np.where(level[i] == step)[0][0]
-            
-            level[i] = np.delete(level[i], rm)
-            solution = np.append(solution, step)
-
-            if current_time + distance_matrix[solution[-2], solution[-1]]\
-                <= intervals[solution[-1]][0]:
-                current_time = intervals[solution[-1]][0]
-            else:
-                current_time += distance_matrix[solution[-2], solution[-1]]
-            
-            i += 1
-            time_control[i] = current_time
-        else:
-            level.pop()
-            solution = solution[:-1]
-            i -= 1
-            current_time = time_control[i]
-            time_control[i + 1] = 0
-
-    solution = np.append(solution, solution[0])
-
-    return solution
-
+#%%
 def rollout_algorithm(problem, starting_node=0):
     # Distance Matrix
     distance_matrix = np.array(problem['distance_matrix'], dtype=np.int32)
     intervals = np.array(problem['intervals'], dtype=np.int32)
-    current_time = np.int32(0)
+    current_time = 0
     # Number of cities
     num_cities = np.array(problem['dimension'], dtype=np.int32) 
     
     # Initial solution
-    solution = [starting_node]
+    solution = [0, starting_node]
     # solution = np.array([starting_node], dtype=np.int32)
 
     # Rollout Algorithm run for num_cities - 1 steps
@@ -219,52 +200,71 @@ def rollout_algorithm(problem, starting_node=0):
         best_next_city = None
         
         # Run over viable cities not visiteds
-        for j in one_step_viability(np.array(current_solution, dtype=np.int32), current_time, distance_matrix, intervals):
+        for j in one_step_viability(np.array(current_solution[1:], dtype=np.int32), current_solution[0], distance_matrix, intervals):
             # Adding candidate next city
             current_solution.append(j)
             auxiliar_time = current_time + distance_matrix[current_solution[-2], current_solution[-1]]
+            current_solution[0] = auxiliar_time
 
             # Run Base Policy
-            backtracking_solution = backtraking_greed_policy(np.array(current_solution, dtype=np.int32), auxiliar_time, distance_matrix, intervals)
+            aux_sol = np.zeros(num_cities + 2, dtype=np.int32)
+            aux_sol[:len(current_solution)] = current_solution
+            backtracking_solution = backtracking(aux_sol, distance_matrix, intervals)
             # rollout_cost = calculate_solution_cost(nn_solution, List(distance_matrix))
-            if not is_feasible(backtracking_solution, distance_matrix, intervals):
+            if not is_feasible(backtracking_solution[1:], distance_matrix, intervals):
                 rollout_cost = np.int32(999999)
             else:
-                rollout_cost = calculate_solution_cost(backtracking_solution, distance_matrix)
+                rollout_cost = calculate_solution_cost(backtracking_solution[1:], distance_matrix)
             # Tests to optimize costs.
             if rollout_cost < best_rollout_cost:
                 best_rollout_cost = rollout_cost
                 best_next_city = j
+                best_auxiliar_time = auxiliar_time
             
             # Remove cadidate
             current_solution.pop()
         # Adding best next city
         solution.append(best_next_city)
+        solution[0] = max(best_auxiliar_time, intervals[best_next_city][0])
+        current_time = solution[0]
     # End of algorithm with start city
     solution.append(starting_node)
 
     return solution
 
+#%%
+
 def experiments_with(problem):
-    start = time.perf_counter()
-    rollout_solution = rollout_algorithm(problem)
-    rollout_time = time.perf_counter() - start
-    rollout_cost = calculate_solution_cost(rollout_solution, problem['distance_matrix'])
     
     # execute nearest neighbor algorithm and calculate time
     start = time.perf_counter()
-    backtracking_solution = backtraking_greed_policy(np.array([0], dtype=np.int32), 0, \
+    backtracking_solution = backtracking(np.zeros(problem['dimension'] + 2, dtype=np.int32), \
         np.array(problem['distance_matrix'], dtype=np.int32), \
         np.array(problem['intervals'], dtype=np.int32))
     backtracking_time = time.perf_counter() - start
-    backtracking_cost = calculate_solution_cost(backtracking_solution, problem['distance_matrix'])
+    backtracking_cost = calculate_solution_cost(backtracking_solution[1:], problem['distance_matrix'])
+    backtracking_solution[0] = int(backtracking_cost)
+
+    start = time.perf_counter()
+    rollout_solution = rollout_algorithm(problem)
+    rollout_time = time.perf_counter() - start
+    rollout_cost = calculate_solution_cost(np.array(rollout_solution[1:], dtype=np.int32), problem['distance_matrix'])
+    rollout_solution[0] = int(rollout_cost)
 
     return rollout_solution, rollout_cost, rollout_time, backtracking_solution, backtracking_cost, backtracking_time
 
+#%%
+
 # for i in [20, 40, 60]:
 for i in [20]:
-    # for j in [20, 40, 60, 80]:
-    for j in [20]:
+    # to cache
+    path = f'instances/tsptw_data/DumasEtAl/n{i}w20.001.txt'
+    problem = read_data(path)
+    backtracking_solution = backtracking(np.zeros(problem['dimension'] + 2, dtype=np.int32), \
+            np.array(problem['distance_matrix'], dtype=np.int32), \
+            np.array(problem['intervals'], dtype=np.int32))
+    for j in [20, 40, 60, 80]:
+    # for j in [20]:
         # Create Results file
         results = open(f'experiments/results_{time.strftime("%d%b%Y_%H_%M_%S", time.gmtime())}.txt', 'w')
         # Write header
@@ -279,9 +279,35 @@ for i in [20]:
             pre_process(problem['distance_matrix'], problem['intervals'])
             rollout_solution, rollout_cost, rollout_time, backtracking_solution, backtracking_cost, backtracking_time = experiments_with(problem)
             results.write(f'{instance},{rollout_cost},{rollout_time},{backtracking_cost},{backtracking_time}\n')
-            results.write('rollout:      ' + str(np.array(rollout_solution)) +'\n')
-            results.write('backtracking: ' + str(np.array(backtracking_solution)) +'\n')
+            results.write('rollout:      ' + str(rollout_solution) +'\n')
+            results.write('backtracking: ' + str(list(backtracking_solution)) +'\n')
     
     results.close()
 
-    
+
+#%%
+# path = '/home/rodrigomeneses/Documents/repositorios/rollout_tsptw/instances/tsptw_data/DumasEtAl/n20w20.001.txt'
+path = 'instances/tsptw_data/DumasEtAl/n40w20.001.txt'
+problem = read_data(path)
+pre_process(problem['distance_matrix'], problem['intervals'])
+
+#%%
+
+# solution = np.array([0, 16, 9, 19, 17, 18, 10, 5, 15, 1, 11, 12, 6, 13, 7, 2, 4, 8, 20, 3, 14, 0])
+# solution = np.array([1, 2, 15, 19, 5, 9, 8, 6, 16, 12, 17, 20, 18, 11, 13, 4, 7, 3, 21, 10, 14, 1]) - 1
+# solution = np.array([1, 6, 20, 14, 2, 9, 17, 5, 10, 4, 8, 16, 15, 18, 12, 3, 11, 19, 21, 7, 13, 1]) - 1
+# solution = np.array([1, 12, 4, 3, 20, 8, 16, 10, 9, 6, 7, 11, 15, 5, 13, 17, 19, 14, 21, 18, 2, 1]) - 1
+# solution = np.array([1, 20, 12, 8, 19, 17, 14, 9, 4, 18, 3, 6, 11, 5, 16, 10, 15, 7, 21, 2, 13, 1]) - 1
+# solution = backtraking_greed_policy(np.array([0], dtype=np.int32), 0, np.array(problem['distance_matrix'], dtype=np.int32), np.array(problem['intervals'], dtype=np.int32))
+distance_matrix = np.array(problem['distance_matrix'], dtype=np.int32)
+intervals = np.array(problem['intervals'], dtype=np.int32)
+
+# rollout_algorithm(problem)
+start = time.perf_counter()
+solution = backtracking(np.zeros(problem['distance_matrix'].shape[0] + 2, dtype=np.int32), distance_matrix, intervals)
+print(solution)
+print(is_feasible(solution[1:], distance_matrix, intervals))
+print(time.perf_counter() - start)
+# print(is_feasible(solution, problem['distance_matrix'], problem['intervals']))
+
+#%%
