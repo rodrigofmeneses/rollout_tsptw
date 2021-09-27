@@ -199,7 +199,7 @@ def one_step_viability(solution, current_time, distance_matrix, intervals):
     return actions
 
 #%%
-def rollout_algorithm(problem, start_time, time_limit=10):
+def rollout_algorithm(problem, start_time, total_time_limit, heuristic_time_limit):
     # Distance Matrix
     distance_matrix = np.array(problem['distance_matrix'], dtype=np.int32)
     intervals = np.array(problem['intervals'], dtype=np.int32)
@@ -223,8 +223,13 @@ def rollout_algorithm(problem, start_time, time_limit=10):
         # Run over viable cities not visiteds
         for j in one_step_viability(np.array(current_solution[1:], dtype=np.int32), current_solution[0], distance_matrix, intervals):
             # Adding candidate next city
-            if time.perf_counter() - start_time > time_limit:
+            # Verify time limit
+            limit = time.perf_counter() - start_time
+            if limit > total_time_limit:
                 return solution
+            elif limit < heuristic_time_limit:
+                heuristic_time_limit = limit / 1.3
+
             current_solution.append(j)
             auxiliar_time = current_time + distance_matrix[current_solution[-2], current_solution[-1]]
             current_solution[0] = auxiliar_time
@@ -233,7 +238,7 @@ def rollout_algorithm(problem, start_time, time_limit=10):
             aux_sol = np.zeros(num_cities + 2, dtype=np.int32)
             aux_sol[:len(current_solution)] = current_solution
             backtracking_solution = backtracking(aux_sol, distance_matrix, intervals, \
-                time.perf_counter(), time_limit=100)
+                time.perf_counter(), time_limit=1.3*heuristic_time_limit)
             
             if is_feasible(backtracking_solution[1:], distance_matrix, intervals):
                 rollout_cost = calculate_solution_cost(backtracking_solution[1:], distance_matrix)
@@ -258,21 +263,21 @@ def rollout_algorithm(problem, start_time, time_limit=10):
     return solution
 
 #%%
-def experiments_with(problem, start_time, time_limit=300):
+def experiments_with(problem, start_time, total_time_limit=300):
     
     # execute nearest neighbor algorithm and calculate time
     start = time.perf_counter()
     backtracking_solution = backtracking(np.zeros(problem['dimension'] + 2, dtype=np.int32), \
         np.array(problem['distance_matrix'], dtype=np.int32), \
         np.array(problem['intervals'], dtype=np.int32), \
-        start_time, time_limit=time_limit)
+        start_time, time_limit=total_time_limit)
         
     backtracking_time = time.perf_counter() - start
     backtracking_cost = calculate_solution_cost(backtracking_solution[1:], problem['distance_matrix'])
     backtracking_solution[0] = int(backtracking_cost)
 
     start = time.perf_counter()
-    rollout_solution = rollout_algorithm(problem, start_time, time_limit=time_limit)
+    rollout_solution = rollout_algorithm(problem, start_time, total_time_limit=total_time_limit, heuristic_time_limit=backtracking_time)
     rollout_time = time.perf_counter() - start
     rollout_cost = calculate_solution_cost(np.array(rollout_solution[1:], dtype=np.int32), problem['distance_matrix'])
     rollout_solution[0] = int(rollout_cost)
@@ -296,10 +301,10 @@ if __name__ == '__main__':
     # autor = 'GendreauEtAl'
     autor = 'DumasEtAl'
     # autor = 'DumasExtend(Gendreau)'
-    # for i in [100]:
     for i in [40]:
+    # for i in [20, 40, 60]:
         # for j in [120, 140, 160, 180, 200]:
-        for j in [60]:
+        for j in [20, 40, 60]:
             experiment_time = time.perf_counter()
             print('-------------------------------------------------------------------------------')
             print(f'Starting Experiments with {autor}_n{i}w{j} at total time {time.perf_counter() - total_time}')
@@ -308,8 +313,8 @@ if __name__ == '__main__':
             results = open(f'experiments/results_{time.strftime("%d%b%Y_%H_%M_%S", time.gmtime())}.txt', 'w')
             # Write header
             results.write('instance_name,rol_time,backtracking_time\n')
-            for k in [5]:
-            # for k in [1, 2, 3, 4, 5]:
+            # for k in [3]:
+            for k in [1, 2, 3, 4, 5]:
                 start_time = time.perf_counter()
                 # Instance Name 
                 instance = f'n{i}w{j}.00{k}'
@@ -324,9 +329,10 @@ if __name__ == '__main__':
                 print(f'Total time: {time.perf_counter() - total_time}')
                 print('-------------------------------------------------------------------------------')
                 
+                ttl = 3600
                 rollout_solution, rollout_time, backtracking_solution, backtracking_time = \
-                    experiments_with(problem, start_time, time_limit=1800)
-                results.write(f'meia_hora,{autor}_{instance},{rollout_time},{backtracking_time}\n')
+                    experiments_with(problem, start_time, total_time_limit=ttl)
+                results.write(f'{ttl},{autor}_{instance},{rollout_time},{backtracking_time}\n')
                 results.write('rollout:      ' + str(list(rollout_solution)) +'\n')
                 results.write('backtracking: ' + str(list(backtracking_solution)) +'\n')
                 print('-------------------------------------------------------------------------------')
@@ -346,6 +352,7 @@ if __name__ == '__main__':
 #%%
 # path = '/home/rodrigomeneses/Documents/repositorios/rollout_tsptw/instances/tsptw_data/DumasEtAl/n20w20.001.txt'
 # path = 'instances/tsptw_data/DumasEtAl/n40w60.003.txt'
+# path = 'instances/tsptw_data/GendreauEtAl/n40w140.004.txt'
 # problem = read_data(path)
 # pre_process(problem['distance_matrix'], problem['intervals'])
 
